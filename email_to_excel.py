@@ -2,24 +2,27 @@
 """
 Email to Excel Converter
 Reads .txt email files (HTML bodies exported from Outlook) from a folder
-and writes an Excel summary with Subject, Date, and Body Excerpt.
-Date is taken from the file's last-modified timestamp.
+and writes an Excel summary with Subject, Date, Body Excerpt, and a
+Claude-generated reply suggestion.
 
 Usage:
     pip install -r requirements.txt
+    set ANTHROPIC_API_KEY=sk-...   (Windows) or export ANTHROPIC_API_KEY=sk-...
     python email_to_excel.py
 """
 
+import os
 import re
 import sys
 from datetime import datetime
-from pathlib import Path
 from os.path import getmtime
+from pathlib import Path
 
 try:
     from bs4 import BeautifulSoup
     import openpyxl
     from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+    import anthropic
 except ImportError as exc:
     print(f"Missing dependency: {exc}")
     print("Run:  pip install -r requirements.txt")
@@ -30,6 +33,13 @@ except ImportError as exc:
 EMAILS_FOLDER = r"C:\Users\diash2\OneDrive - Medtronic PLC\TEMP\Emails"
 BODY_EXCERPT_LENGTH = 300
 OUTPUT_PREFIX = "Email_Summary"
+AI_MODEL = "claude-haiku-4-5-20251001"
+
+_SYSTEM_PROMPT = (
+    "You are a professional email assistant. "
+    "Given an email body, write a concise, polite reply suggestion in 2-3 sentences. "
+    "Reply only with the suggested text — no preamble, no subject line, no sign-off."
+)
 
 
 # ── HTML → plain text ──────────────────────────────────────────────────────────
@@ -50,8 +60,28 @@ def make_excerpt(text: str) -> str:
     return flat[:BODY_EXCERPT_LENGTH].rstrip() + "…"
 
 
+# ── AI reply suggestion ────────────────────────────────────────────────────────
+def get_reply_suggestion(client: anthropic.Anthropic, plain_text: str) -> str:
+    try:
+        response = client.messages.create(
+            model=AI_MODEL,
+            max_tokens=256,
+            system=[
+                {
+                    "type": "text",
+                    "text": _SYSTEM_PROMPT,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": plain_text[:4000]}],
+        )
+        return response.content[0].text.strip()
+    except Exception as exc:
+        return f"[Error: {exc}]"
+
+
 # ── Parse one email file ───────────────────────────────────────────────────────
-def parse_email_file(path: Path) -> dict:
+def parse_email_file(path: Path, client: anthropic.Anthropic) -> dict:
     content = path.read_text(encoding="utf-8", errors="replace")
     plain = html_to_text(content)
     file_date = datetime.fromtimestamp(getmtime(path)).strftime("%Y-%m-%d %H:%M")
@@ -59,14 +89,16 @@ def parse_email_file(path: Path) -> dict:
         "Subject": path.stem,
         "Date": file_date,
         "Body Excerpt": make_excerpt(plain),
+        "Reply Suggestion": get_reply_suggestion(client, plain),
     }
 
 
 # ── Excel generation ───────────────────────────────────────────────────────────
 COLUMNS = [
-    ("Subject",      55),
-    ("Date",         20),
-    ("Body Excerpt", 80),
+    ("Subject",          50),
+    ("Date",             18),
+    ("Body Excerpt",     60),
+    ("Reply Suggestion", 60),
 ]
 
 _HDR_FILL = PatternFill(start_color="00285A", end_color="00285A", fill_type="solid")
@@ -111,8 +143,15 @@ def generate_excel(emails: list, output_path: Path) -> None:
 
 # ── Main ───────────────────────────────────────────────────────────────────────
 def main() -> None:
-    folder = Path(EMAILS_FOLDER)
+    api_key = os.environ.get("ANTHROPIC_API_KEY")
+    if not api_key:
+        print("ERROR: ANTHROPIC_API_KEY environment variable is not set.")
+        print("Set it with:  set ANTHROPIC_API_KEY=sk-...")
+        sys.exit(1)
 
+    client = anthropic.Anthropic(api_key=api_key)
+
+    folder = Path(EMAILS_FOLDER)
     if not folder.exists():
         print(f"ERROR: Folder not found:\n  {folder}")
         sys.exit(1)
@@ -131,7 +170,7 @@ def main() -> None:
     emails = []
     for path in txt_files:
         try:
-            emails.append(parse_email_file(path))
+            emails.append(parse_email_file(path, client))
             print(f"  OK  {path.name}")
         except Exception as exc:
             print(f"  ERR {path.name}: {exc}")
