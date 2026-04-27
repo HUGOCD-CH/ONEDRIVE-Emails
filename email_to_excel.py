@@ -2,11 +2,8 @@
 """
 Email to Excel Converter
 Reads .txt email files (HTML bodies exported from Outlook) from a folder
-and writes an Excel summary with Subject, From, To, Date, and Body Excerpt.
-
-NOTE: From, To, and Date are not embedded in these HTML body files.
-Those columns are included in the output but will be blank. If you need
-them populated, save emails as .eml or .msg from Outlook instead.
+and writes an Excel summary with Subject, Date, and Body Excerpt.
+Date is taken from the file's last-modified timestamp.
 
 Usage:
     pip install -r requirements.txt
@@ -17,6 +14,7 @@ import re
 import sys
 from datetime import datetime
 from pathlib import Path
+from os.path import getmtime
 
 try:
     from bs4 import BeautifulSoup
@@ -56,22 +54,19 @@ def make_excerpt(text: str) -> str:
 def parse_email_file(path: Path) -> dict:
     content = path.read_text(encoding="utf-8", errors="replace")
     plain = html_to_text(content)
+    file_date = datetime.fromtimestamp(getmtime(path)).strftime("%Y-%m-%d %H:%M")
     return {
         "Subject": path.stem,
-        "From": "",
-        "To": "",
-        "Date": "",
+        "Date": file_date,
         "Body Excerpt": make_excerpt(plain),
     }
 
 
 # ── Excel generation ───────────────────────────────────────────────────────────
 COLUMNS = [
-    ("Subject",      50),
-    ("From",         28),
-    ("To",           28),
-    ("Date",         18),
-    ("Body Excerpt", 75),
+    ("Subject",      55),
+    ("Date",         20),
+    ("Body Excerpt", 80),
 ]
 
 _HDR_FILL = PatternFill(start_color="00285A", end_color="00285A", fill_type="solid")
