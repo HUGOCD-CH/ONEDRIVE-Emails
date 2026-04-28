@@ -2,7 +2,7 @@
 """
 Email to Excel Converter
 Reads .txt email files (HTML bodies exported from Outlook) from a folder
-and writes an Excel summary with Subject, Date, and Body Excerpt.
+and writes an Excel summary with Subject, Date, and full Body content.
 Date is taken from the file's last-modified timestamp.
 
 Usage:
@@ -28,7 +28,6 @@ except ImportError as exc:
 
 # ── Configuration ──────────────────────────────────────────────────────────────
 EMAILS_FOLDER = r"C:\Users\diash2\OneDrive - Medtronic PLC\TEMP\Emails"
-BODY_EXCERPT_LENGTH = 300
 OUTPUT_PREFIX = "Email_Summary"
 
 
@@ -43,30 +42,23 @@ def html_to_text(html: str) -> str:
     return text.strip()
 
 
-def make_excerpt(text: str) -> str:
-    flat = " ".join(text.split())
-    if len(flat) <= BODY_EXCERPT_LENGTH:
-        return flat
-    return flat[:BODY_EXCERPT_LENGTH].rstrip() + "…"
-
-
 # ── Parse one email file ───────────────────────────────────────────────────────
 def parse_email_file(path: Path) -> dict:
     content = path.read_text(encoding="utf-8", errors="replace")
-    plain = html_to_text(content)
+    plain = " ".join(html_to_text(content).split())
     file_date = datetime.fromtimestamp(getmtime(path)).strftime("%Y-%m-%d %H:%M")
     return {
         "Subject": path.stem,
         "Date": file_date,
-        "Body Excerpt": make_excerpt(plain),
+        "Body": plain,
     }
 
 
 # ── Excel generation ───────────────────────────────────────────────────────────
 COLUMNS = [
-    ("Subject",      55),
-    ("Date",         20),
-    ("Body Excerpt", 80),
+    ("Subject", 55),
+    ("Date",    20),
+    ("Body",    80),
 ]
 
 _HDR_FILL = PatternFill(start_color="00285A", end_color="00285A", fill_type="solid")
